@@ -1,4 +1,4 @@
-sparse_hierarchy
+deep_hierarchy
 ================
 
-Very simple extendable deep learning model.
+Very simple extendable deep learning model. 
