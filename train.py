@@ -1,68 +1,72 @@
 import matplotlib.image as mpimg
-
-import pylab as pl
-
-from sklearn.decomposition import MiniBatchDictionaryLearning
-from sklearn.feature_extraction.image import extract_patches_2d
-from sklearn.feature_extraction.image import reconstruct_from_patches_2d
-
 import numpy as np
+import argparse
 import os
 
-V1_PATCH_SIZE = 8
-V1_COMPS = 100
+from hierarchy import Hierarchy
 
-MULTIPLIER = 3
-
-V2_PATCH_SIZE = V1_PATCH_SIZE * MULTIPLIER
-V2_COMPS = 100
-
-V3_PATCH_SIZE = V2_PATCH_SIZE * MULTIPLIER
-V3_COMPS = 100
-
-v1learning = MiniBatchDictionaryLearning(n_components=V1_COMPS, alpha=1, n_iter=1000)
-v2learning = MiniBatchDictionaryLearning(n_components=V2_COMPS, alpha=1, n_iter=1000)
-v3learning = MiniBatchDictionaryLearning(n_components=V3_COMPS, alpha=1, n_iter=1000)
-
-v1learning.set_params(transform_algorithm='omp', transform_n_nonzero_coefs=2)
-v2learning.set_params(transform_algorithm='omp', transform_n_nonzero_coefs=2)
-v3learning.set_params(transform_algorithm='omp', transform_n_nonzero_coefs=2)
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
-
-def load_images():
+def load_file(name):
     try:
-        return np.load('imgs.npy')
-    except:
-        imgs = []
-        for f in os.listdir('data'):
-            num = int(f.split('img')[-1].split('.')[0])
-            data = mpimg.imread('data/' + f)
-            data = data / 256.
-            imgs.append((num, np.float32(data)))
-
-        imgs = [t[1] for t in sorted(imgs, key=lambda x: x[0])]
-        np.save('imgs', imgs)
-    return np.dstack(imgs)
-
+        data = mpimg.imread(name)
+    except IOError:
+        raise Exception('{} is not an image file'.format(name))
+    if len(data.shape) == 3:
+        # rgb, converting to grayscale
+        data = np.mean(data, -1)
+    if np.max(data) > 1:
+        # if pixel values are distributed from 0 to 256
+        data = data / 256.
+    data = np.float32(data)
+    return data
 
 
-def main():
-    # data is width x height x images number array
-    images = load_images()
-    img = images[0, :, :]
+def load_folder(name):
+    files = os.listdir(name)
+    data = []
+    for f in files:
+        try:
+            data.append(load_file(os.path.join(name, f)))
+        except Exception as e:
+            print e
+    if not data:
+        raise Exception("{} if empty or contains no image files".format(name))
+    return data
 
-    from hierarchy import Hierarchy
 
-    H = Hierarchy(img)
-    multiplier = 3
-    H.add_layer(8, 100, 0)
-    H.add_layer(8 * multiplier, 100, multiplier)
-    H.add_layer(8 * multiplier * multiplier, 100, multiplier)
+def main(input_data, basement, num_layers, multiplier, num_patches, features):
+    if os.path.isfile(input_data):
+        data = load_file(input_data)
+    elif os.path.isdir(input_data):
+        data = load_folder(input_data)
+    else:
+        raise Exception('{} is neither file nor directory'.format(input_data))
+    if features:
+        try:
+            features = [int(f) for f in features.split(',')]
+        except:
+            raise Exception('Bad features: {}. Expecting a bunch of integers separated by comma'.format(features))
+        if len(features) != num_layers:
+            raise Exception('{} features specified, but total number of layers is {}'.format(len(features), num_layers))
+
+    H = Hierarchy(data)
+    for i in xrange(num_layers):
+        mult = 0 if i == 0 else multiplier
+        f = features[i] if features else 100
+        H.add_layer(basement * (multiplier ** i), f, num_patches, mult)
     H.learn()
-    H.visualize_layer(2)
-
-
+    H.visualize_layer(i)
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=str, help='image or folder with images')
+    parser.add_argument("-b", "--basement", type=int, help='patch size for the bottom layer', default=8)
+    parser.add_argument("-l", "--num_layers", type=int, help='number of layers in hierarchy', default=3)
+    parser.add_argument("-m", "--multiplier", type=int, help='layer multiplier', default=3)
+    parser.add_argument("--num_patches", type=int, help='number of patches to train on', default=1000)
+    parser.add_argument("--features", type=str, help='number of features for each layer. Example: 25,81,100 for 3 layers')
+    args = parser.parse_args()
+    main(args.input, args.basement, args.num_layers, args.multiplier, args.num_patches, args.features)
